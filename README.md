@@ -10,11 +10,11 @@ Frontend fourni : https://github.com/ZOUHEIRBN/MSOA-E-com-Demo
 | Service   | Port | Responsable | Technologie        |
 |-----------|------|-------------|--------------------|
 | Auth      | 8081 | hiba ouafi      | Python |
-| Catalog   | 8082 | ablou fatime zahera      | Python           |
-| Inventory | 8083 | ouatile yousra      | Python          |
+| Catalog   | 8082 |  ouatile yousra      | Python           |
+| Inventory | 8083 | Fouzi hajar     | Python          |
 | Orders    | 8084 | hiba mhada  | Python       |
 | Payments  | 8085 | Aya Moujoud | Python / FastAPI + SQLite |
-| Shipping  | 8086 | fouzi hajar      | Python           |
+| Shipping  | 8086 | ablou fatime zahera      | Python           |
 
 ## Architecture
 
