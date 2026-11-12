@@ -97,3 +97,25 @@ def get_product(product_id: int):
     if row is None:
         raise HTTPException(status_code=404, detail="Product not found")
     return as_product(row)
+
+# LAB 3 - API V2 : nouveau format du prix
+
+def to_v2_product(product):
+    product = dict(product)
+    product["price"] = {
+        "amount": product["price"],
+        "currency": "MAD"
+    }
+    return product
+
+
+@app.get("/v2/products")
+def get_products_v2():
+    products = get_products()
+    return [to_v2_product(p) for p in products]
+
+
+@app.get("/v2/products/{product_id}")
+def get_product_v2(product_id: int):
+    product = get_product(product_id)
+    return to_v2_product(product)
