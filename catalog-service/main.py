@@ -1,28 +1,41 @@
-"""Catalog microservice for MSOA Shop — FastAPI + SQLite."""
+
+"""Catalog microservice — FastAPI + SQLite + Kafka."""
+
 from contextlib import closing
 from pathlib import Path
 import sqlite3
 from urllib.parse import quote
+from html import escape
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+# LAB 4 - Kafka
+from kafka_producer import publish_product_consulted
+
 DB_PATH = Path(__file__).with_name("catalog.db")
+
 app = FastAPI(title="Catalog Service", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+    ],
     allow_credentials=False,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
 
+# --------------------------------
+# Images des produits
+# --------------------------------
+
 def image_for(label: str) -> str:
-    """Stable self-contained placeholder that needs no external image host."""
-    from html import escape
     clean = escape(label)
+
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420">'
         '<rect width="640" height="420" fill="#e7ecf2"/>'
@@ -31,8 +44,13 @@ def image_for(label: str) -> str:
         f'font-family="Arial,sans-serif" font-weight="700" font-size="35" fill="#52657a">{clean}</text>'
         '</svg>'
     )
+
     return "data:image/svg+xml;charset=utf-8," + quote(svg, safe="")
 
+
+# --------------------------------
+# Produits initiaux
+# --------------------------------
 
 SEED_PRODUCTS = [
     (1, "Lenovo ThinkPad E14", "Laptops", 7999.0, "ThinkPad E14", "Ordinateur portable Lenovo ThinkPad E14"),
@@ -43,6 +61,10 @@ SEED_PRODUCTS = [
     (6, "Apple iPad Air", "Tablets", 7299.0, "iPad Air", "Tablette Apple iPad Air"),
 ]
 
+
+# --------------------------------
+# SQLite
+# --------------------------------
 
 def connect_db():
     conn = sqlite3.connect(DB_PATH)
@@ -62,12 +84,22 @@ def init_db():
                 description TEXT NOT NULL
             )
         """)
+
         for pid, name, category, price, img_label, description in SEED_PRODUCTS:
             conn.execute(
-                "INSERT OR IGNORE INTO products (id, name, category, price, image, description) "
+                "INSERT OR IGNORE INTO products "
+                "(id, name, category, price, image, description) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (pid, name, category, price, image_for(img_label), description),
+                (
+                    pid,
+                    name,
+                    category,
+                    price,
+                    image_for(img_label),
+                    description
+                ),
             )
+
         conn.commit()
 
 
@@ -78,12 +110,18 @@ def as_product(row):
     return dict(row)
 
 
+# --------------------------------
+# LAB 2 - API V1
+# --------------------------------
+
 @app.get("/products")
 def get_products():
     with closing(connect_db()) as conn:
         rows = conn.execute(
-            "SELECT id, name, category, price, image, description FROM products ORDER BY id"
+            "SELECT id, name, category, price, image, description "
+            "FROM products ORDER BY id"
         ).fetchall()
+
     return [as_product(row) for row in rows]
 
 
@@ -91,21 +129,32 @@ def get_products():
 def get_product(product_id: int):
     with closing(connect_db()) as conn:
         row = conn.execute(
-            "SELECT id, name, category, price, image, description FROM products WHERE id = ?",
+            "SELECT id, name, category, price, image, description "
+            "FROM products WHERE id = ?",
             (product_id,),
         ).fetchone()
+
     if row is None:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
+
     return as_product(row)
 
-# LAB 3 - API V2 : nouveau format du prix
+
+# --------------------------------
+# LAB 3 - API V2
+# --------------------------------
 
 def to_v2_product(product):
     product = dict(product)
+
     product["price"] = {
         "amount": product["price"],
         "currency": "MAD"
     }
+
     return product
 
 
@@ -119,3 +168,28 @@ def get_products_v2():
 def get_product_v2(product_id: int):
     product = get_product(product_id)
     return to_v2_product(product)
+
+
+# --------------------------------
+# LAB 4 - Kafka Producer
+# --------------------------------
+
+@app.post("/products/{product_id}/consultations")
+def record_product_consultation(product_id: int):
+
+    # Vérifier l'existence du produit dans SQLite
+    get_product(product_id)
+
+    try:
+        event = publish_product_consulted(product_id)
+
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Kafka service unavailable"
+        )
+
+    return {
+        "message": "Product consultation event published",
+        "event": event
+    }
