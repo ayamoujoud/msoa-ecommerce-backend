@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import os
 import sqlite3
 import uuid
@@ -8,6 +10,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+# >>> RABBITMQ
+from rabbitmq_publisher import publish_shipment_requested
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("payments")
 
 # ---------- Configuration ----------
 ORDERS_URL = os.getenv("ORDERS_URL", "http://localhost:8084")
@@ -21,7 +29,7 @@ PAYABLE_STATUSES = set(
     os.getenv("PAYABLE_STATUSES", "PENDING,CREATED,PENDING_PAYMENT").split(",")
 )
 
-app = FastAPI(title="Payments Service", version="1.0.0")
+app = FastAPI(title="Payments Service", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -132,6 +140,36 @@ async def mark_order_paid(order_id: str) -> bool:
         return False
 
 
+# >>> RABBITMQ
+def extract_address(order: dict) -> str:
+    """Récupère l'adresse de livraison dans la commande (le nom du champ
+    dépend du service Orders : on essaie plusieurs possibilités)."""
+    raw = (
+        order.get("shippingAddress")
+        or order.get("shipping_address")
+        or order.get("address")
+        or order.get("deliveryAddress")
+    )
+    if isinstance(raw, dict):
+        parts = [raw.get(k) for k in ("street", "city", "postalCode", "country")]
+        raw = ", ".join(str(p) for p in parts if p)
+    return str(raw) if raw else "Address not provided"
+
+
+# >>> RABBITMQ
+async def notify_shipping(order_id: str, order: dict) -> None:
+    """Publie ShipmentRequested. Le paiement reste valide même si RabbitMQ
+    est indisponible : on journalise l'erreur sans faire échouer la requête."""
+    try:
+        # pika est bloquant : on l'exécute dans un thread
+        message_id = await asyncio.to_thread(
+            publish_shipment_requested, order_id, extract_address(order)
+        )
+        logger.info("ShipmentRequested envoyé pour la commande %s (%s)", order_id, message_id)
+    except Exception as e:
+        logger.error("Échec publication ShipmentRequested (commande %s) : %s", order_id, e)
+
+
 # ---------- Endpoints ----------
 @app.get("/health")
 def health():
@@ -220,6 +258,9 @@ async def create_payment(body: PaymentRequest):
                     "UPDATE payments SET status = 'FAILED' WHERE id = ?", (payment_id,)
                 )
             raise ApiError(502, "Could not update order status; payment cancelled")
+
+        # >>> RABBITMQ : 6) paiement confirmé -> demander la préparation de l'expédition
+        await notify_shipping(body.orderId, order)
 
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM payments WHERE id = ?", (payment_id,)).fetchone()
