@@ -14,7 +14,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-INVENTORY_URL = os.getenv("INVENTORY_URL", "http://localhost:8083")
+import inventory_client
+
 CATALOG_URL = os.getenv("CATALOG_URL", "http://localhost:8082")
 SHIPPING_URL = os.getenv("SHIPPING_URL", "http://localhost:8086")
 DB_PATH = os.getenv("DB_PATH", "orders.db")
@@ -182,18 +183,11 @@ def extract_price(product: dict) -> float:
 
 def inventory_call(action: str, items: list) -> bool:
     try:
-        r = httpx.post(
-            f"{INVENTORY_URL}/api/inventory/{action}",
-            json={"items": items},
-            timeout=5,
-        )
-    except httpx.RequestError:
+        return inventory_client.call(action, items)
+    except inventory_client.InventoryUnavailable:
         raise HTTPException(503, "Inventory service unavailable")
-    if r.status_code >= 500:
+    except inventory_client.InventoryError:
         raise HTTPException(502, "Inventory service error")
-    if r.status_code >= 400:
-        return False
-    return bool(r.json().get("success", False))
 
 
 def get_shipment_if_any(order_id: str) -> Optional[dict]:
