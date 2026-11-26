@@ -4,11 +4,26 @@ from pydantic import BaseModel
 
 app = FastAPI()
 
+ADDRESSES = [
+    "Casablanca, Morocco",
+    "Rabat, Morocco",
+    "Marrakech, Morocco",
+    "Tanger, Morocco",
+    "Fes, Morocco",
+]
+
+# order-1 ... order-5, tous PENDING, chacun avec une adresse
 ORDERS = {
-    "order-1": {"id": "order-1", "userId": "user-1", "items": [{"productId": 1, "quantity": 2}],
-                "total": 100.0, "status": "PENDING", "createdAt": "2026-11-10T10:00:00Z"},
-    "order-2": {"id": "order-2", "userId": "user-1", "items": [{"productId": 2, "quantity": 1}],
-                "total": 50.0, "status": "PENDING", "createdAt": "2026-11-10T10:05:00Z"},
+    f"order-{i}": {
+        "id": f"order-{i}",
+        "userId": "user-1",
+        "items": [{"productId": i, "quantity": 1}],
+        "total": 50.0 * i,
+        "status": "PENDING",
+        "shippingAddress": ADDRESSES[i - 1],
+        "createdAt": "2026-11-10T10:00:00Z",
+    }
+    for i in range(1, 6)
 }
 
 
